@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Retro Pong</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #090d16;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      padding: 12px;
+    }
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 500px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .badge {
+      background: #1e293b;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    canvas {
+      background: #020617;
+      border: 2px solid #334155;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+      max-width: 100%;
+      touch-action: none;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    button {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="badge">PLAYER: <span id="p-score" style="color:#38bdf8;">0</span></div>
+    <div class="badge">FIRST TO 11</div>
+    <div class="badge">CPU: <span id="c-score" style="color:#ef4444;">0</span></div>
+  </div>
+
+  <canvas id="game" width="500" height="340"></canvas>
+
+  <div class="controls">
+    <button id="mode-btn">Mode: 1P vs CPU</button>
+    <button id="restart-btn">Restart (R)</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const pScoreEl = document.getElementById('p-score');
+    const cScoreEl = document.getElementById('c-score');
+    const modeBtn = document.getElementById('mode-btn');
+    const restartBtn = document.getElementById('restart-btn');
+
+    let p1 = { y: 130, w: 10, h: 70, speed: 6 };
+    let p2 = { y: 130, w: 10, h: 70, speed: 4.5 };
+    let ball = { x: 250, y: 170, vx: 5, vy: 3, r: 6 };
+    let pScore = 0;
+    let cScore = 0;
+    let is2Player = false;
+    let keys = {};
+    let isGameOver = false;
+
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(freq, dur=0.06) {
+      if (audio.state === 'suspended') audio.resume();
+      try {
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        o.frequency.setValueAtTime(freq, audio.currentTime);
+        g.gain.setValueAtTime(0.05, audio.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+        o.connect(g);
+        g.connect(audio.destination);
+        o.start();
+        o.stop(audio.currentTime + dur);
+      } catch(e) {}
+    }
+
+    function resetBall(servingP1 = true) {
+      ball.x = canvas.width / 2;
+      ball.y = canvas.height / 2;
+      ball.vx = (servingP1 ? 4.5 : -4.5);
+      ball.vy = (Math.random() - 0.5) * 4;
+    }
+
+    function resetGame() {
+      pScore = 0;
+      cScore = 0;
+      isGameOver = false;
+      pScoreEl.textContent = '0';
+      cScoreEl.textContent = '0';
+      resetBall();
+    }
+
+    function update() {
+      if (!isGameOver) {
+        // Player 1 controls (W/S or Up/Down if 1P)
+        if (keys['w'] || keys['W'] || (!is2Player && (keys['ArrowUp'] || keys['w']))) {
+          p1.y = Math.max(0, p1.y - p1.speed);
+        }
+        if (keys['s'] || keys['S'] || (!is2Player && (keys['ArrowDown'] || keys['s']))) {
+          p1.y = Math.min(canvas.height - p1.h, p1.y + p1.speed);
+        }
+
+        // Player 2 or CPU
+        if (is2Player) {
+          if (keys['ArrowUp']) p2.y = Math.max(0, p2.y - p2.speed);
+          if (keys['ArrowDown']) p2.y = Math.min(canvas.height - p2.h, p2.y + p2.speed);
+        } else {
+          // Smart AI tracking with natural reaction
+          const targetY = ball.y - p2.h / 2;
+          if (ball.vx > 0) {
+            if (p2.y < targetY - 4) p2.y += p2.speed;
+            else if (p2.y > targetY + 4) p2.y -= p2.speed;
+          }
+          p2.y = Math.max(0, Math.min(canvas.height - p2.h, p2.y));
+        }
+
+        // Ball movement
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+
+        // Top/bottom bounce
+        if (ball.y - ball.r <= 0 || ball.y + ball.r >= canvas.height) {
+          ball.vy *= -1;
+          beep(220);
+        }
+
+        // P1 hit
+        if (
+          ball.x - ball.r <= 25 + p1.w &&
+          ball.x + ball.r >= 25 &&
+          ball.y >= p1.y &&
+          ball.y <= p1.y + p1.h &&
+          ball.vx < 0
+        ) {
+          ball.vx = Math.abs(ball.vx) * 1.05;
+          const delta = (ball.y - (p1.y + p1.h / 2)) / (p1.h / 2);
+          ball.vy = delta * 5;
+          beep(440);
+        }
+
+        // P2 hit
+        if (
+          ball.x + ball.r >= canvas.width - 25 - p2.w &&
+          ball.x - ball.r <= canvas.width - 25 &&
+          ball.y >= p2.y &&
+          ball.y <= p2.y + p2.h &&
+          ball.vx > 0
+        ) {
+          ball.vx = -Math.abs(ball.vx) * 1.05;
+          const delta = (ball.y - (p2.y + p2.h / 2)) / (p2.h / 2);
+          ball.vy = delta * 5;
+          beep(500);
+        }
+
+        // Score points
+        if (ball.x < 0) {
+          cScore++;
+          cScoreEl.textContent = cScore;
+          beep(150, 0.2);
+          if (cScore >= 11) isGameOver = true;
+          else resetBall(true);
+        } else if (ball.x > canvas.width) {
+          pScore++;
+          pScoreEl.textContent = pScore;
+          beep(660, 0.2);
+          if (pScore >= 11) isGameOver = true;
+          else resetBall(false);
+        }
+      }
+
+      draw();
+      requestAnimationFrame(update);
+    }
+
+    function draw() {
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Center dashed net
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, 0);
+      ctx.lineTo(canvas.width / 2, canvas.height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // P1 Paddle
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(25, p1.y, p1.w, p1.h);
+
+      // P2 Paddle
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(canvas.width - 25 - p2.w, p2.y, p2.w, p2.h);
+
+      // Ball
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (isGameOver) {
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = pScore >= 11 ? '#38bdf8' : '#ef4444';
+        ctx.font = 'bold 24px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(pScore >= 11 ? 'PLAYER 1 WINS!' : (is2Player ? 'PLAYER 2 WINS!' : 'CPU WINS!'), canvas.width / 2, canvas.height / 2 - 10);
+        ctx.font = '14px system-ui';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('Press R or Restart to Play Again', canvas.width / 2, canvas.height / 2 + 20);
+      }
+    }
+
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      if (e.key === 'r' || e.key === 'R') resetGame();
+    });
+    window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+    canvas.addEventListener('touchmove', e => {
+      const rect = canvas.getBoundingClientRect();
+      const scale = canvas.height / rect.height;
+      const touchY = (e.touches[0].clientY - rect.top) * scale;
+      p1.y = Math.max(0, Math.min(canvas.height - p1.h, touchY - p1.h / 2));
+    }, {passive: true});
+
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      const scale = canvas.height / rect.height;
+      const mouseY = (e.clientY - rect.top) * scale;
+      p1.y = Math.max(0, Math.min(canvas.height - p1.h, mouseY - p1.h / 2));
+    });
+
+    modeBtn.addEventListener('click', () => {
+      is2Player = !is2Player;
+      modeBtn.textContent = is2Player ? 'Mode: 2 Players (W/S & ↑/↓)' : 'Mode: 1P vs CPU';
+      resetGame();
+    });
+
+    restartBtn.addEventListener('click', resetGame);
+
+    resetGame();
+    requestAnimationFrame(update);
+  </script>
+</body>
+</html>

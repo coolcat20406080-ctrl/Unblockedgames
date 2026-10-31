@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Space Defender</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #050811;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      padding: 10px;
+    }
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .badge {
+      background: #111827;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid #1f2937;
+    }
+    canvas {
+      background: #030712;
+      border: 2px solid #1f2937;
+      border-radius: 10px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+      max-width: 100%;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    button {
+      background: #1f2937;
+      color: #f8fafc;
+      border: 1px solid #374151;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #374151; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="badge">SCORE: <span id="score" style="color:#10b981;">0</span></div>
+    <div class="badge">LIVES: <span id="lives" style="color:#ef4444;">❤❤❤</span></div>
+    <div class="badge">WAVE: <span id="wave">1</span></div>
+  </div>
+
+  <canvas id="game" width="480" height="480"></canvas>
+
+  <div class="controls">
+    <button id="restart-btn">Restart (R)</button>
+    <button id="pause-btn">Pause (P)</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    const waveEl = document.getElementById('wave');
+    const restartBtn = document.getElementById('restart-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+
+    let player = { x: 220, y: 440, w: 32, h: 18, speed: 5 };
+    let bullets = [];
+    let enemyBullets = [];
+    let enemies = [];
+    let enemyDir = 1;
+    let enemyStepDown = false;
+    let enemySpeed = 1;
+    let score = 0;
+    let lives = 3;
+    let wave = 1;
+    let isGameOver = false;
+    let isPaused = false;
+    let keys = {};
+
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(freq, type='square', dur=0.06, vol=0.04) {
+      if (audio.state === 'suspended') audio.resume();
+      try {
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        o.type = type;
+        o.frequency.setValueAtTime(freq, audio.currentTime);
+        g.gain.setValueAtTime(vol, audio.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+        o.connect(g);
+        g.connect(audio.destination);
+        o.start();
+        o.stop(audio.currentTime + dur);
+      } catch(e) {}
+    }
+
+    function initEnemies() {
+      enemies = [];
+      const rows = 4;
+      const cols = 8;
+      const colors = ['#f43f5e', '#a855f7', '#06b6d4', '#10b981'];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          enemies.push({
+            x: 40 + c * 50,
+            y: 40 + r * 35,
+            w: 28,
+            h: 20,
+            color: colors[r],
+            alive: true,
+            pts: (4 - r) * 20
+          });
+        }
+      }
+      enemySpeed = 1 + wave * 0.2;
+    }
+
+    function resetGame() {
+      score = 0;
+      lives = 3;
+      wave = 1;
+      bullets = [];
+      enemyBullets = [];
+      player.x = 220;
+      isGameOver = false;
+      isPaused = false;
+      scoreEl.textContent = '0';
+      livesEl.textContent = '❤❤❤';
+      waveEl.textContent = '1';
+      initEnemies();
+    }
+
+    function shoot() {
+      if (bullets.length < 3 && !isGameOver && !isPaused) {
+        bullets.push({ x: player.x + player.w / 2 - 2, y: player.y, w: 4, h: 10, vy: -7 });
+        beep(700, 'triangle', 0.08);
+      }
+    }
+
+    function update() {
+      if (!isPaused && !isGameOver) {
+        // Player movement
+        if ((keys['ArrowLeft'] || keys['a']) && player.x > 10) player.x -= player.speed;
+        if ((keys['ArrowRight'] || keys['d']) && player.x + player.w < canvas.width - 10) player.x += player.speed;
+
+        // Player bullets
+        bullets.forEach(b => { b.y += b.vy; });
+        bullets = bullets.filter(b => b.y > 0);
+
+        // Enemy movement
+        let hitEdge = false;
+        enemies.forEach(e => {
+          if (!e.alive) return;
+          if ((e.x + e.w >= canvas.width - 15 && enemyDir > 0) || (e.x <= 15 && enemyDir < 0)) {
+            hitEdge = true;
+          }
+        });
+
+        if (hitEdge) {
+          enemyDir *= -1;
+          enemies.forEach(e => { e.y += 15; });
+        } else {
+          enemies.forEach(e => { e.x += enemyDir * enemySpeed; });
+        }
+
+        // Check alien invasion reached bottom
+        enemies.forEach(e => {
+          if (e.alive && e.y + e.h >= player.y) {
+            isGameOver = true;
+            beep(120, 'sawtooth', 0.3);
+          }
+        });
+
+        // Alien shooting
+        if (Math.random() < 0.03 + wave * 0.005) {
+          const living = enemies.filter(e => e.alive);
+          if (living.length > 0) {
+            const shooter = living[Math.floor(Math.random() * living.length)];
+            enemyBullets.push({ x: shooter.x + shooter.w / 2, y: shooter.y + shooter.h, w: 4, h: 8, vy: 3 + wave * 0.3 });
+          }
+        }
+
+        // Enemy bullets update
+        enemyBullets.forEach(b => {
+          b.y += b.vy;
+          // Check player hit
+          if (b.x > player.x && b.x < player.x + player.w && b.y > player.y && b.y < player.y + player.h) {
+            lives--;
+            b.y = 9999;
+            livesEl.textContent = '❤'.repeat(Math.max(0, lives));
+            beep(180, 'sawtooth', 0.2);
+            if (lives <= 0) isGameOver = true;
+          }
+        });
+        enemyBullets = enemyBullets.filter(b => b.y < canvas.height);
+
+        // Bullet hit enemy
+        bullets.forEach(b => {
+          enemies.forEach(e => {
+            if (e.alive && b.x > e.x && b.x < e.x + e.w && b.y > e.y && b.y < e.y + e.h) {
+              e.alive = false;
+              b.y = -10;
+              score += e.pts;
+              scoreEl.textContent = score;
+              beep(400, 'square', 0.07);
+            }
+          });
+        });
+
+        // Wave cleared
+        if (enemies.every(e => !e.alive)) {
+          wave++;
+          waveEl.textContent = wave;
+          bullets = [];
+          enemyBullets = [];
+          initEnemies();
+          beep(880, 'triangle', 0.2);
+        }
+      }
+
+      draw();
+      requestAnimationFrame(update);
+    }
+
+    function draw() {
+      ctx.fillStyle = '#030712';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Stars
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      for (let i = 0; i < 40; i++) {
+        const sx = (i * 97) % canvas.width;
+        const sy = (i * 131) % canvas.height;
+        ctx.fillRect(sx, sy, 1.5, 1.5);
+      }
+
+      // Player Tank
+      ctx.fillStyle = '#10b981';
+      ctx.fillRect(player.x, player.y + 6, player.w, player.h - 6);
+      ctx.fillRect(player.x + player.w / 2 - 3, player.y, 6, 6);
+
+      // Bullets
+      ctx.fillStyle = '#38bdf8';
+      bullets.forEach(b => { ctx.fillRect(b.x, b.y, b.w, b.h); });
+
+      // Enemy Bullets
+      ctx.fillStyle = '#f43f5e';
+      enemyBullets.forEach(b => { ctx.fillRect(b.x, b.y, b.w, b.h); });
+
+      // Enemies
+      enemies.forEach(e => {
+        if (!e.alive) return;
+        ctx.fillStyle = e.color;
+        ctx.fillRect(e.x + 4, e.y, e.w - 8, e.h);
+        ctx.fillRect(e.x, e.y + 4, e.w, e.h - 8);
+        // Eyes
+        ctx.fillStyle = '#030712';
+        ctx.fillRect(e.x + 6, e.y + 6, 4, 4);
+        ctx.fillRect(e.x + e.w - 10, e.y + 6, 4, 4);
+      });
+
+      if (isGameOver) {
+        ctx.fillStyle = 'rgba(3, 7, 18, 0.85)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 24px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('MISSION FAILED', canvas.width / 2, canvas.height / 2 - 10);
+        ctx.font = '14px system-ui';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('Press R or Restart to Defend Again', canvas.width / 2, canvas.height / 2 + 20);
+      }
+    }
+
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        shoot();
+      } else if (e.key === 'r' || e.key === 'R') {
+        resetGame();
+      } else if (e.key === 'p' || e.key === 'P') {
+        isPaused = !isPaused;
+      }
+    });
+
+    window.addEventListener('keyup', e => {
+      keys[e.key] = false;
+    });
+
+    canvas.addEventListener('click', shoot);
+    canvas.addEventListener('touchmove', e => {
+      const rect = canvas.getBoundingClientRect();
+      const scale = canvas.width / rect.width;
+      const touchX = (e.touches[0].clientX - rect.left) * scale;
+      player.x = Math.max(10, Math.min(canvas.width - player.w - 10, touchX - player.w / 2));
+    }, {passive: true});
+
+    restartBtn.addEventListener('click', resetGame);
+    pauseBtn.addEventListener('click', () => { isPaused = !isPaused; });
+
+    resetGame();
+    requestAnimationFrame(update);
+  </script>
+</body>
+</html>

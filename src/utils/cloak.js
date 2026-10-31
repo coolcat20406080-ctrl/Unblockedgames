@@ -58,7 +58,8 @@ export function openAboutBlankGame(iframeUrl, title) {
     newWin.document.body.style.background = '#020617';
 
     const iframe = newWin.document.createElement('iframe');
-    iframe.src = window.location.origin + (iframeUrl.startsWith('/') ? iframeUrl : '/' + iframeUrl);
+    const resolvedUrl = new URL(iframeUrl, window.location.href).href;
+    iframe.src = resolvedUrl;
     iframe.style.width = '100%';
     iframe.style.height = '100%';
     iframe.style.border = 'none';
