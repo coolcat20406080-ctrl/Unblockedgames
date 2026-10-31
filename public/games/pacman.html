@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Maze Chomper</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #090d16;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      padding: 10px;
+    }
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 440px;
+      margin-bottom: 10px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .badge {
+      background: #1e293b;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    canvas {
+      background: #030712;
+      border: 2px solid #1e293b;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.8);
+      max-width: 100%;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    button {
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="badge">SCORE: <span id="score" style="color:#eab308;">0</span></div>
+    <div class="badge">LIVES: <span id="lives" style="color:#ef4444;">❤❤❤</span></div>
+  </div>
+
+  <canvas id="game" width="400" height="400"></canvas>
+
+  <div class="controls">
+    <button id="restart-btn">Restart (R)</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    const restartBtn = document.getElementById('restart-btn');
+
+    const TILE = 25;
+    const GRID_SIZE = 16;
+
+    // 1 = Wall, 0 = Pellet, 2 = Power Pellet, 3 = Empty/Spawn
+    const MAP = [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,2,0,0,0,0,1,0,0,1,0,0,0,0,2,1],
+      [1,0,1,1,1,0,1,0,0,1,0,1,1,1,0,1],
+      [1,0,1,3,1,0,0,0,0,0,0,1,3,1,0,1],
+      [1,0,1,1,1,0,1,1,1,1,0,1,1,1,0,1],
+      [1,0,0,0,0,0,0,3,3,0,0,0,0,0,0,1],
+      [1,1,1,0,1,1,3,1,1,3,1,1,0,1,1,1],
+      [3,3,1,0,1,3,3,3,3,3,3,1,0,1,3,3],
+      [1,1,1,0,1,3,1,1,1,1,3,1,0,1,1,1],
+      [1,0,0,0,0,0,1,3,3,1,0,0,0,0,0,1],
+      [1,0,1,1,1,0,1,1,1,1,0,1,1,1,0,1],
+      [1,0,0,1,0,0,0,0,0,0,0,0,1,0,0,1],
+      [1,1,0,1,0,1,1,0,0,1,1,0,1,0,1,1],
+      [1,0,0,0,0,0,1,0,0,1,0,0,0,0,0,1],
+      [1,2,1,1,1,0,0,0,0,0,0,1,1,1,2,1],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+
+    let grid = [];
+    let player = { x: 7, y: 11, dirX: 0, dirY: 0, nextX: 0, nextY: 0, mouth: 0.2 };
+    let ghosts = [];
+    let score = 0;
+    let lives = 3;
+    let isGameOver = false;
+    let frightenedTimer = 0;
+
+    const audio = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(freq, dur=0.06) {
+      if (audio.state === 'suspended') audio.resume();
+      try {
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        o.frequency.setValueAtTime(freq, audio.currentTime);
+        g.gain.setValueAtTime(0.04, audio.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+        o.connect(g);
+        g.connect(audio.destination);
+        o.start();
+        o.stop(audio.currentTime + dur);
+      } catch(e) {}
+    }
+
+    function init() {
+      grid = MAP.map(row => [...row]);
+      player = { x: 7, y: 11, dirX: 0, dirY: 0, nextX: 0, nextY: 0, mouth: 0.2 };
+      ghosts = [
+        { x: 7, y: 7, color: '#ef4444', dirX: 1, dirY: 0 },
+        { x: 8, y: 7, color: '#06b6d4', dirX: -1, dirY: 0 }
+      ];
+      score = 0;
+      lives = 3;
+      frightenedTimer = 0;
+      isGameOver = false;
+      scoreEl.textContent = '0';
+      livesEl.textContent = '❤❤❤';
+    }
+
+    function canMove(gx, gy) {
+      if (gx < 0 || gx >= GRID_SIZE || gy < 0 || gy >= GRID_SIZE) return false;
+      return grid[gy][gx] !== 1;
+    }
+
+    function step() {
+      if (isGameOver) return;
+
+      // Player next dir
+      if (player.nextX !== 0 || player.nextY !== 0) {
+        if (canMove(player.x + player.nextX, player.y + player.nextY)) {
+          player.dirX = player.nextX;
+          player.dirY = player.nextY;
+        }
+      }
+
+      if (canMove(player.x + player.dirX, player.y + player.dirY)) {
+        player.x += player.dirX;
+        player.y += player.dirY;
+
+        // Eat pellet
+        if (grid[player.y][player.x] === 0) {
+          grid[player.y][player.x] = 3;
+          score += 10;
+          scoreEl.textContent = score;
+          beep(500, 0.04);
+        } else if (grid[player.y][player.x] === 2) {
+          grid[player.y][player.x] = 3;
+          score += 50;
+          scoreEl.textContent = score;
+          frightenedTimer = 25;
+          beep(750, 0.1);
+        }
+      }
+
+      // Ghosts AI
+      if (frightenedTimer > 0) frightenedTimer--;
+
+      ghosts.forEach(g => {
+        const moves = [
+          { dx: 1, dy: 0 },
+          { dx: -1, dy: 0 },
+          { dx: 0, dy: 1 },
+          { dx: 0, dy: -1 }
+        ].filter(m => canMove(g.x + m.dx, g.y + m.dy) && !(m.dx === -g.dirX && m.dy === -g.dirY));
+
+        if (moves.length > 0) {
+          // Move towards player or random if frightened
+          if (frightenedTimer > 0 || Math.random() < 0.4) {
+            const pick = moves[Math.floor(Math.random() * moves.length)];
+            g.dirX = pick.dx;
+            g.dirY = pick.dy;
+          } else {
+            // Sort by distance to player
+            moves.sort((a, b) => {
+              const distA = Math.hypot(g.x + a.dx - player.x, g.y + a.dy - player.y);
+              const distB = Math.hypot(g.x + b.dx - player.x, g.y + b.dy - player.y);
+              return distA - distB;
+            });
+            g.dirX = moves[0].dx;
+            g.dirY = moves[0].dy;
+          }
+        }
+        g.x += g.dirX;
+        g.y += g.dirY;
+
+        // Hit player
+        if (g.x === player.x && g.y === player.y) {
+          if (frightenedTimer > 0) {
+            g.x = 7; g.y = 7;
+            score += 200;
+            scoreEl.textContent = score;
+            beep(900, 0.15);
+          } else {
+            lives--;
+            livesEl.textContent = '❤'.repeat(Math.max(0, lives));
+            beep(140, 0.25);
+            player.x = 7; player.y = 11;
+            player.dirX = 0; player.dirY = 0;
+            if (lives <= 0) isGameOver = true;
+          }
+        }
+      });
+
+      draw();
+    }
+
+    function draw() {
+      ctx.fillStyle = '#030712';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw maze
+      for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+          if (grid[r][c] === 1) {
+            ctx.fillStyle = '#1e3a8a';
+            ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
+          } else if (grid[r][c] === 0) {
+            ctx.fillStyle = '#fbbf24';
+            ctx.beginPath();
+            ctx.arc(c * TILE + TILE/2, r * TILE + TILE/2, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (grid[r][c] === 2) {
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(c * TILE + TILE/2, r * TILE + TILE/2, 5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
+      // Draw Player
+      const px = player.x * TILE + TILE/2;
+      const py = player.y * TILE + TILE/2;
+      ctx.fillStyle = '#eab308';
+      let angle = 0;
+      if (player.dirX === 1) angle = 0;
+      else if (player.dirX === -1) angle = Math.PI;
+      else if (player.dirY === 1) angle = Math.PI / 2;
+      else if (player.dirY === -1) angle = -Math.PI / 2;
+
+      ctx.beginPath();
+      ctx.arc(px, py, TILE/2 - 2, angle + 0.35, angle + Math.PI * 2 - 0.35);
+      ctx.lineTo(px, py);
+      ctx.fill();
+
+      // Draw Ghosts
+      ghosts.forEach(g => {
+        const gx = g.x * TILE + TILE/2;
+        const gy = g.y * TILE + TILE/2;
+        ctx.fillStyle = frightenedTimer > 0 ? '#3b82f6' : g.color;
+        ctx.beginPath();
+        ctx.arc(gx, gy - 2, TILE/2 - 3, Math.PI, 0);
+        ctx.lineTo(gx + TILE/2 - 3, gy + TILE/2 - 3);
+        ctx.lineTo(gx - TILE/2 + 3, gy + TILE/2 - 3);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(gx - 5, gy - 4, 3, 4);
+        ctx.fillRect(gx + 2, gy - 4, 3, 4);
+      });
+
+      if (isGameOver) {
+        ctx.fillStyle = 'rgba(3, 7, 18, 0.85)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 22px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText('CAUGHT BY GHOSTS', canvas.width / 2, canvas.height / 2 - 10);
+        ctx.font = '14px system-ui';
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('Press R or Restart to Play Again', canvas.width / 2, canvas.height / 2 + 20);
+      }
+    }
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowUp' || e.key === 'w') { player.nextX = 0; player.nextY = -1; }
+      else if (e.key === 'ArrowDown' || e.key === 's') { player.nextX = 0; player.nextY = 1; }
+      else if (e.key === 'ArrowLeft' || e.key === 'a') { player.nextX = -1; player.nextY = 0; }
+      else if (e.key === 'ArrowRight' || e.key === 'd') { player.nextX = 1; player.nextY = 0; }
+      else if (e.key === 'r' || e.key === 'R') init();
+    });
+
+    restartBtn.addEventListener('click', init);
+
+    init();
+    setInterval(step, 180);
+  </script>
+</body>
+</html>

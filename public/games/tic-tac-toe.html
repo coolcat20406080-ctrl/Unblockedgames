@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Tic-Tac-Toe Master</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #090d16;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      padding: 16px;
+    }
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 340px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .badge {
+      background: #1e293b;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+    .status {
+      font-size: 16px;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 16px;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, 90px);
+      grid-template-rows: repeat(3, 90px);
+      gap: 8px;
+      background: #1e293b;
+      padding: 8px;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+    }
+    .cell {
+      background: #0f172a;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 42px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .cell:hover { background: #1e293b; }
+    .cell.x { color: #38bdf8; }
+    .cell.o { color: #f43f5e; }
+    .cell.win { background: #065f46; color: #34d399; }
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      width: 100%;
+      max-width: 340px;
+    }
+    button {
+      flex: 1;
+      background: #1e293b;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      padding: 10px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="badge">X (YOU): <span id="x-wins" style="color:#38bdf8;">0</span></div>
+    <div class="badge">TIE: <span id="ties">0</span></div>
+    <div class="badge">O (BOT): <span id="o-wins" style="color:#f43f5e;">0</span></div>
+  </div>
+
+  <div class="status" id="status-text">Your Turn (X)</div>
+
+  <div class="board" id="board">
+    <div class="cell" data-i="0"></div>
+    <div class="cell" data-i="1"></div>
+    <div class="cell" data-i="2"></div>
+    <div class="cell" data-i="3"></div>
+    <div class="cell" data-i="4"></div>
+    <div class="cell" data-i="5"></div>
+    <div class="cell" data-i="6"></div>
+    <div class="cell" data-i="7"></div>
+    <div class="cell" data-i="8"></div>
+  </div>
+
+  <div class="controls">
+    <button id="mode-btn">Mode: vs Bot</button>
+    <button id="reset-btn">New Round</button>
+  </div>
+
+  <script>
+    const cells = document.querySelectorAll('.cell');
+    const statusText = document.getElementById('status-text');
+    const xWinsEl = document.getElementById('x-wins');
+    const tiesEl = document.getElementById('ties');
+    const oWinsEl = document.getElementById('o-wins');
+    const modeBtn = document.getElementById('mode-btn');
+    const resetBtn = document.getElementById('reset-btn');
+
+    let board = Array(9).fill('');
+    let turn = 'X';
+    let vsBot = true;
+    let isGameOver = false;
+    let xWins = 0, oWins = 0, ties = 0;
+
+    const WIN_COMBOS = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+
+    function checkWin(b, player) {
+      return WIN_COMBOS.some(combo => combo.every(idx => b[idx] === player));
+    }
+
+    function getWinningCombo(b, player) {
+      return WIN_COMBOS.find(combo => combo.every(idx => b[idx] === player));
+    }
+
+    function handleClick(idx) {
+      if (board[idx] || isGameOver) return;
+
+      board[idx] = turn;
+      render();
+
+      if (checkWin(board, turn)) {
+        isGameOver = true;
+        const combo = getWinningCombo(board, turn);
+        combo.forEach(i => cells[i].classList.add('win'));
+        statusText.textContent = `${turn} Wins! 🎉`;
+        if (turn === 'X') { xWins++; xWinsEl.textContent = xWins; }
+        else { oWins++; oWinsEl.textContent = oWins; }
+        return;
+      }
+
+      if (board.every(cell => cell !== '')) {
+        isGameOver = true;
+        statusText.textContent = "It's a Draw!";
+        ties++; tiesEl.textContent = ties;
+        return;
+      }
+
+      turn = turn === 'X' ? 'O' : 'X';
+      statusText.textContent = turn === 'X' ? "Your Turn (X)" : (vsBot ? "Bot Thinking..." : "Player O Turn");
+
+      if (vsBot && turn === 'O' && !isGameOver) {
+        setTimeout(botMove, 300);
+      }
+    }
+
+    function botMove() {
+      if (isGameOver) return;
+      // Smart move or win block
+      let move = -1;
+
+      // 1. Can Bot win?
+      for (let i = 0; i < 9; i++) {
+        if (!board[i]) {
+          board[i] = 'O';
+          if (checkWin(board, 'O')) { move = i; }
+          board[i] = '';
+          if (move !== -1) break;
+        }
+      }
+
+      // 2. Can player win? Block it!
+      if (move === -1) {
+        for (let i = 0; i < 9; i++) {
+          if (!board[i]) {
+            board[i] = 'X';
+            if (checkWin(board, 'X')) { move = i; }
+            board[i] = '';
+            if (move !== -1) break;
+          }
+        }
+      }
+
+      // 3. Center
+      if (move === -1 && !board[4]) move = 4;
+
+      // 4. Random available
+      if (move === -1) {
+        const avail = board.map((val, idx) => val === '' ? idx : null).filter(val => val !== null);
+        if (avail.length > 0) move = avail[Math.floor(Math.random() * avail.length)];
+      }
+
+      if (move !== -1) handleClick(move);
+    }
+
+    function render() {
+      cells.forEach((cell, idx) => {
+        cell.textContent = board[idx];
+        cell.className = 'cell' + (board[idx] ? ` ${board[idx].toLowerCase()}` : '');
+      });
+    }
+
+    function resetRound() {
+      board = Array(9).fill('');
+      turn = 'X';
+      isGameOver = false;
+      statusText.textContent = "Your Turn (X)";
+      render();
+    }
+
+    cells.forEach((cell, idx) => {
+      cell.addEventListener('click', () => handleClick(idx));
+    });
+
+    modeBtn.addEventListener('click', () => {
+      vsBot = !vsBot;
+      modeBtn.textContent = vsBot ? 'Mode: vs Bot' : 'Mode: 2 Players';
+      resetRound();
+    });
+
+    resetBtn.addEventListener('click', resetRound);
+  </script>
+</body>
+</html>
